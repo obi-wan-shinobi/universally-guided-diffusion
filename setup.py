@@ -1,0 +1,37 @@
+from setuptools import find_packages, setup
+
+setup(
+    name="universally-guided-diffusion",
+    version="0.1.0",
+    packages=find_packages(where="src"),
+    package_dir={"": "src"},
+    install_requires=[
+        "torch>=2.7.0,<3.0.0",
+        "torchvision>=0.22.0,<0.23.0",
+        "torchaudio>=2.7.0,<3.0.0",
+        "numpy>=2.2.5,<3.0.0",
+        "pandas>=2.2.3,<3.0.0",
+        "matplotlib>=3.10.1,<4.0.0",
+        "scikit-learn>=1.6.1,<2.0.0",
+        "jupyter>=1.1.1,<2.0.0",
+        "ipython>=9.2.0,<10.0.0",
+        "diffusers==0.10.2",
+        "scipy>=1.15.2,<2.0.0",
+        "ftfy>=6.3.1,<7.0.0",
+        "accelerate>=1.6.0,<2.0.0",
+        "huggingface-hub==0.25.0",
+        "transformers<=4.26.0",
+    ],
+    extras_require={
+        "dev": [
+            "black==25.1.0",
+            "flake8==7.2.0",
+            "isort==6.0.1",
+            "mypy==1.15.0",
+            "pytest==8.3.5",
+            "pytest-cov==6.1.1",
+            "notebook==7.4.2",
+            "pynvim==0.5.2",
+        ]
+    },
+)
