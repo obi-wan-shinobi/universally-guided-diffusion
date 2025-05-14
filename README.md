@@ -6,9 +6,7 @@
 
 1. **Install Poetry** (if not already installed):
 
-```bash
-curl -sSL https://install.python-poetry.org | python3 -
-```
+Follow the instructions here: [Poetry Installation](https://python-poetry.org/docs/)
 
 2. Install dependencies and the project
 
