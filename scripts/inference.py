@@ -20,7 +20,10 @@ unet = load_unet(torch_device)
 scheduler = create_scheduler()
 
 # Prompt to generate image from
-prompt = ["an anime painting of starry night"]
+prompt = [
+    "an anime painting of starry night",
+    "a photo of an astronaut riding a horse on mars",
+]
 
 # Run the generation pipeline
 image_tensor = generate_image_from_prompt(
@@ -41,4 +44,5 @@ image_tensor = generate_image_from_prompt(
 
 # Convert to PIL and save
 pil_images = latents_to_pil(image_tensor)
-pil_images[0].save("tmp/another_sample.png")
+for i, image in enumerate(pil_images):
+    image.save(f"tmp/sample_{i}.png")
