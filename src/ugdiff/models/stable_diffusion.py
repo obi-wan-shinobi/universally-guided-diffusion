@@ -1,6 +1,32 @@
 import torch
-import torch.nn as nn
+from diffusers import AutoencoderKL, LMSDiscreteScheduler, UNet2DConditionModel
+from transformers import CLIPTextModel, CLIPTokenizer
 
-# I think we should define a basic Diffusion model here
-# A class that takes in a UNet and scheduler. We can use the Unet from Compvis
-# Based on the paper, we need to have a forward, denoise, add_noise steps
+
+def load_vae(device):
+    vae = AutoencoderKL.from_pretrained(
+        "CompVis/stable-diffusion-v1-4", subfolder="vae"
+    )
+    return vae.to(device)
+
+
+def load_text_encoder(device):
+    tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+    text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
+    return tokenizer, text_encoder.to(device)
+
+
+def load_unet(device):
+    unet = UNet2DConditionModel.from_pretrained(
+        "CompVis/stable-diffusion-v1-4", subfolder="unet"
+    )
+    return unet.to(device)
+
+
+def create_scheduler(num_train_timesteps=1000):
+    return LMSDiscreteScheduler(
+        beta_start=0.00085,
+        beta_end=0.012,
+        beta_schedule="scaled_linear",
+        num_train_timesteps=num_train_timesteps,
+    )
