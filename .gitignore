@@ -395,3 +395,5 @@ android/pytorch_android_torchvision/.cxx
 .pyre_client
 
 tmp/
+coco/
+segmented/
