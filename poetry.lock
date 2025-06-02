@@ -2995,6 +2995,47 @@ files = [
 tests = ["pytest"]
 
 [[package]]
+name = "pycocotools"
+version = "2.0.9"
+description = "Official APIs for the MS-COCO dataset"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "pycocotools-2.0.9-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:168b604e86142d36b8b763de0340fadc8cd6f339334f3d87a472dbda2d23a8e7"},
+    {file = "pycocotools-2.0.9-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:b9253da4e47ca7d966ea1f8204b001dd0478a7f8cd3cf8db4b2f045736f6b17d"},
+    {file = "pycocotools-2.0.9-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d69507cd6301aac201fa22913b1c0f348c8f8648720f0505f235a4437dcb2dfc"},
+    {file = "pycocotools-2.0.9-cp310-cp310-musllinux_1_1_x86_64.whl", hash = "sha256:bd857ca85fecb34a063d5869b4f49378b86a8feb7fe88b9b03bc30e30db30651"},
+    {file = "pycocotools-2.0.9-cp310-cp310-win_amd64.whl", hash = "sha256:93a5a7d505a2ecfdd017024a451c2416c02a5cdbb808ea84284aad196b99f065"},
+    {file = "pycocotools-2.0.9-cp310-cp310-win_arm64.whl", hash = "sha256:2dfe14794c47a39dd2d405de4c42accf8559ec976adaa2c3aaade719d4166ff6"},
+    {file = "pycocotools-2.0.9-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:ab68d94c57d5c7958c43bf60f43f152bee96b5514ed5d962f50f0ec0b21e2602"},
+    {file = "pycocotools-2.0.9-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:c3e4f6a3b789ab9d0ecef541acf00f6ceb3b47f34622fe55a6373281a8a95f81"},
+    {file = "pycocotools-2.0.9-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:198f17570ef0984cb5c0e1aa62bf6e1814ce874ed77b0c44ff34549a3cd53bbd"},
+    {file = "pycocotools-2.0.9-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:ba47b2eeb019056d61baeec55aa4e1f5cc50f79a3056e26c35a17a4d8b485753"},
+    {file = "pycocotools-2.0.9-cp311-cp311-win_amd64.whl", hash = "sha256:382e162e4d5fabd0703bf2e317329ed5e6176af02a8ffc42083bdf2807fd6ede"},
+    {file = "pycocotools-2.0.9-cp311-cp311-win_arm64.whl", hash = "sha256:56e144238bd865929dc2778c3fa9dc4ceb8c1281b7288a551d794383afff2ca2"},
+    {file = "pycocotools-2.0.9-cp312-cp312-macosx_10_9_universal2.whl", hash = "sha256:f1576acbe35da77eec80e98571cbbf9dd98b5ed8bf6f9dde5a0705acd3fdc5e0"},
+    {file = "pycocotools-2.0.9-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:15fef0a6ceb53d4818ff402bcd9fe7446dee4296fe9bf44f04be46bac385ef21"},
+    {file = "pycocotools-2.0.9-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7c937845c0f172e532bebcdd458eb6466d01dd8f42d2328120dfa32d5cf5c36b"},
+    {file = "pycocotools-2.0.9-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:813cca6a49c3c58ae95b6287dc23f32fa730b4f75c6f490ccff69b881f1866b0"},
+    {file = "pycocotools-2.0.9-cp312-cp312-win_amd64.whl", hash = "sha256:5c56c06699b527cf65de78f8b486fb305cfe7d87c63f5170563abf6e4d98cb65"},
+    {file = "pycocotools-2.0.9-cp312-cp312-win_arm64.whl", hash = "sha256:20f81ac9f10885d9a45561706193ecacb3e46e0ec9111557d8c969026da7b9ec"},
+    {file = "pycocotools-2.0.9-cp39-cp39-macosx_10_9_universal2.whl", hash = "sha256:3ed8bc76e3f9456dcd714269adcd769c7248098b07199967c756a38f246adf0d"},
+    {file = "pycocotools-2.0.9-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:90766a5514a549b77e0ba8833d9539a71750f27b494b31f23e2503abfef7cf19"},
+    {file = "pycocotools-2.0.9-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b545983a87cfef0951bf4e200c23b0d549b7279edb18f386813215273fbc0bac"},
+    {file = "pycocotools-2.0.9-cp39-cp39-musllinux_1_1_x86_64.whl", hash = "sha256:e898836fbecc769b58eaaf0446d91a754915addc7e1f59b7be77d9dbbd2eb844"},
+    {file = "pycocotools-2.0.9-cp39-cp39-win_amd64.whl", hash = "sha256:dca45930238d7782776257b78a88a57024cf61228414be01df59e2da0826daa8"},
+    {file = "pycocotools-2.0.9-cp39-cp39-win_arm64.whl", hash = "sha256:20f518c45646e8f3c510e7ea78a26a948861f853f3daa20d8fc11fc605269c2d"},
+    {file = "pycocotools-2.0.9.tar.gz", hash = "sha256:ba82e550670aa1182a911fb3e5f0e83345432044438707bd52c2519cda16872a"},
+]
+
+[package.dependencies]
+numpy = "*"
+
+[package.extras]
+all = ["matplotlib (>=2.1.0)"]
+
+[[package]]
 name = "pycodestyle"
 version = "2.13.0"
 description = "Python style guide checker"
@@ -4502,4 +4543,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11"
-content-hash = "ea2764c9b87ddd3b97fcc0b5b665defab21a3eb815e0ebc10fa041636aa393a5"
+content-hash = "f7b61643cc4a45d2043617779a52e2c563f4aa3a792362190f14eb27cc24da16"

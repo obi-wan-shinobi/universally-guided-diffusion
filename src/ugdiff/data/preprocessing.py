@@ -11,13 +11,20 @@ from tqdm import tqdm
 
 from .datasets import COCODataset
 
+# Refer: https://docs.pytorch.org/vision/main/models/generated/torchvision.models.segmentation.lraspp_mobilenet_v3_large.html
+
 cmap = plt.get_cmap("tab20", 21)
 VOC_COLORMAP = (cmap(range(21))[:, :3] * 255).astype(np.uint8)
 
 
 class SegmentationPreprocessor:
     def __init__(
-        self, image_dir, output_dir, batch_size=1, device=None, skip_existing=True
+        self,
+        image_dir="coco/val2017",
+        output_dir="segmented/val2017",
+        batch_size=1,
+        device=None,
+        skip_existing=True,
     ):
         self.image_dir = Path(image_dir)
         self.output_dir = Path(output_dir)
@@ -48,6 +55,56 @@ class SegmentationPreprocessor:
 
     def get_dataset(self):
         return COCODataset(image_dir=self.image_dir, transform=self.transform)
+
+    def segment(self, images, filter_classes=None):
+        """
+        Runs segmentation on input images.
+
+        Args:
+            images (Tensor): Input images (B, 3, H, W).
+            filter_classes (List[int], optional): If provided, zeroes out all class probabilities
+                except those listed.
+
+        Returns:
+            Tensor: Segmentation probability maps (B, C, H, W), filtered if requested.
+        """
+        self.model.eval()
+        images = images.to(self.device)
+        with torch.no_grad():
+            output = self.model(images)["out"]
+            probs = torch.softmax(output, dim=1)
+
+        if filter_classes is not None:
+            # Zero out non-selected classes
+            mask = torch.zeros_like(probs)
+            for cls_id in filter_classes:
+                mask[:, cls_id, :, :] = probs[:, cls_id, :, :]
+            probs = mask
+
+        return probs
+
+    def segmentation_map_to_image(self, class_mask, filter_classes=None):
+        """
+        Converts a class mask to a color image.
+
+        Args:
+            class_mask (Tensor): (H, W) mask of class IDs.
+            filter_classes (List[int], optional): If provided, only visualize those classes.
+
+        Returns:
+            PIL.Image: Colored segmentation map.
+        """
+        class_mask = class_mask.cpu()
+
+        if filter_classes is not None:
+            # Set everything not in filter_classes to background (0)
+            mask = torch.zeros_like(class_mask)
+            for cls_id in filter_classes:
+                mask[class_mask == cls_id] = cls_id
+            class_mask = mask
+
+        colored = VOC_COLORMAP[class_mask.numpy()]
+        return Image.fromarray(colored.astype(np.uint8))
 
     def preprocess(self):
         dataset = self.get_dataset()

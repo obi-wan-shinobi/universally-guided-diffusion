@@ -5,40 +5,58 @@ from pathlib import Path
 
 import torchvision.transforms as T
 from PIL import Image
+from pycocotools.coco import COCO
 from torch.utils.data import Dataset
 
 
 class COCODataset(Dataset):
-    def __init__(self, image_dir=Path("coco/val2017"), transform=None):
-        self.image_dir = image_dir
+    def __init__(
+        self,
+        image_dir=Path("coco/val2017"),
+        annotation_file=Path("coco/annotations/instances_val2017.json"),
+        category_names=["dog"],
+        transform=None,
+    ):
+        self.image_dir = Path(image_dir)
+        self.annotation_file = Path(annotation_file)
         self.transform = transform or T.Compose([T.Resize((512, 512)), T.ToTensor()])
 
+        self.category_names = category_names
         self._ensure_dataset()
-
-        self.filenames = sorted(
-            [fname for fname in os.listdir(image_dir) if fname.endswith(".jpg")]
-        )
-
-    def __len__(self):
-        return len(self.filenames)
+        self._load_annotations()
 
     def _ensure_dataset(self):
-        if os.path.exists(self.image_dir):
-            return
+        if not self.image_dir.exists():
+            print(f"[*] COCO images not found at '{self.image_dir}'. Downloading...")
+            os.makedirs(self.image_dir.parent, exist_ok=True)
 
-        print(f"[*] COCO images not found at '{self.image_dir}'. Downloading...")
-        os.makedirs(os.path.dirname(self.image_dir), exist_ok=True)
+            coco_zip_url = "http://images.cocodataset.org/zips/val2017.zip"
+            zip_path = self.image_dir.parent / "val2017.zip"
 
-        coco_zip_url = "http://images.cocodataset.org/zips/val2017.zip"
-        zip_path = os.path.join(os.path.dirname(self.image_dir), "val2017.zip")
+            if not zip_path.exists():
+                self._download_with_progress(coco_zip_url, zip_path)
+                print(f"Downloaded {zip_path}")
 
-        if not os.path.exists(zip_path):
-            self._download_with_progress(coco_zip_url, zip_path)
-            print(f"Downloaded {zip_path}")
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(self.image_dir.parent)
+                print(f"Extracted to {self.image_dir}")
 
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall(os.path.dirname(self.image_dir))
-            print(f"Extracted to {self.image_dir}")
+        if not self.annotation_file.exists():
+            print(f"[*] COCO annotations not found. Downloading...")
+            os.makedirs(self.annotation_file.parent, exist_ok=True)
+
+            anno_url = (
+                "http://images.cocodataset.org/annotations/annotations_trainval2017.zip"
+            )
+            zip_path = self.annotation_file.parent / "annotations_trainval2017.zip"
+
+            if not zip_path.exists():
+                self._download_with_progress(anno_url, zip_path)
+                print(f"Downloaded {zip_path}")
+
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(self.annotation_file.parent.parent)
+                print(f"Extracted annotations to {self.annotation_file.parent.parent}")
 
     def _download_with_progress(self, url, output_path):
         from tqdm import tqdm
@@ -56,9 +74,22 @@ class COCODataset(Dataset):
                 url, filename=output_path, reporthook=t.update_to
             )
 
+    def _load_annotations(self):
+        self.coco = COCO(self.annotation_file)
+
+        # Get category IDs for desired category names
+        cat_ids = self.coco.getCatIds(catNms=self.category_names)
+        img_ids = self.coco.getImgIds(catIds=cat_ids)
+        imgs = self.coco.loadImgs(img_ids)
+
+        self.filtered_filenames = [img["file_name"] for img in imgs]
+
+    def __len__(self):
+        return len(self.filtered_filenames)
+
     def __getitem__(self, idx):
-        fname = self.filenames[idx]
-        path = os.path.join(self.image_dir, fname)
+        fname = self.filtered_filenames[idx]
+        path = self.image_dir / fname
         image = Image.open(path).convert("RGB")
         image = self.transform(image)
         return image, fname
@@ -68,7 +99,7 @@ if __name__ == "__main__":
     import torchvision.transforms.functional as F
     from torch.utils.data import DataLoader
 
-    dataset = COCODataset()
+    dataset = COCODataset(category_names=["dog"])
     loader = DataLoader(dataset, batch_size=1, shuffle=False)
 
     for image, fname in loader:
