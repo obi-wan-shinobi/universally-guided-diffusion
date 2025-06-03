@@ -5,8 +5,8 @@ description = "Universally Guided Diffusion Project for Generative Modelling"
 authors = [
     {name = "shreyas",email = "shreyaskalvankar@gmail.com"}
 ]
-readme = "readme.md"
-requires-python = ">=3.11"
+readme = "README.md"
+requires-python = ">=3.10,<3.12"
 dependencies = [
     "torch (>=2.7.0,<3.0.0)",
     "torchvision (>=0.22.0,<0.23.0)",
