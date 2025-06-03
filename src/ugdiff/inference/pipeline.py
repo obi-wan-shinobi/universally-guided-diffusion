@@ -68,11 +68,7 @@ class SegmentationGuidedDiffusionPipeline:
                     encoder_hidden_states=text_embeddings,
                 ).sample
 
-            if (
-                False
-                and self.guidance_module is not None
-                and segmentation_maps is not None
-            ):
+            if self.guidance_module is not None and segmentation_maps is not None:
                 latents.requires_grad_(True)
                 alpha_t = self.scheduler.alphas_cumprod[t.long()].to(self.device)
                 pred_z0 = (latents - (1 - alpha_t).sqrt() * noise_pred) / alpha_t.sqrt()
