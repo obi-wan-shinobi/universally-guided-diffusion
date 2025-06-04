@@ -8,8 +8,37 @@ from PIL import Image
 
 # Refer: https://docs.pytorch.org/vision/main/models/generated/torchvision.models.segmentation.lraspp_mobilenet_v3_large.html
 
-cmap = plt.get_cmap("tab20", 21)
-VOC_COLORMAP = (cmap(range(21))[:, :3] * 255).astype(np.uint8)
+
+def get_pascal_labels():
+    """Load the mapping that associates pascal classes with label colors"""
+    return np.asarray(
+        [
+            [0, 0, 0],
+            [128, 0, 0],
+            [0, 128, 0],
+            [128, 128, 0],
+            [0, 0, 128],
+            [128, 0, 128],
+            [0, 128, 128],
+            [128, 128, 128],
+            [64, 0, 0],
+            [192, 0, 0],
+            [64, 128, 0],
+            [192, 128, 0],
+            [64, 0, 128],
+            [192, 0, 128],
+            [64, 128, 128],
+            [192, 128, 128],
+            [0, 64, 0],
+            [128, 64, 0],
+            [0, 192, 0],
+            [128, 192, 0],
+            [0, 64, 128],
+        ]
+    )
+
+
+VOC_COLORMAP = get_pascal_labels()
 
 
 class SegmentationGuidance:
@@ -24,6 +53,10 @@ class SegmentationGuidance:
             weights="LRASPP_MobileNet_V3_Large_Weights.DEFAULT"
         )
         model.eval().to(self.device)
+
+        for param in model.parameters():
+            param.requires_grad = False
+
         return model
 
     def get_transform(self):
@@ -90,6 +123,7 @@ class SegmentationGuidance:
 
     def compute_loss(self, latents, target_masks, class_id, eps=1e-6):
         # Decode latents into images
+        latents = 1 / 0.18215 * latents
         images = self.vae.decode(latents).sample  # (B, 3, H, W), range [-1, 1]
 
         # Normalize images from [-1, 1] to [0, 1]
@@ -110,15 +144,14 @@ class SegmentationGuidance:
 
         # Now segment the images and compute loss
         probs = self.segment_tensor(images)
+        # logits = self.model(images)["out"]
+
         pred_masks = self.extract_class_mask(probs, class_id)
 
         target_masks = F.interpolate(target_masks, size=(520, 520), mode="nearest")
 
-        loss = F.binary_cross_entropy(
-            pred_masks.clamp(eps, 1 - eps),
-            target_masks,
-            reduction="none",
-        )
+        loss = F.binary_cross_entropy(pred_masks, target_masks, reduction="none")
+
         loss = loss.mean(dim=[1, 2, 3])
 
         return loss

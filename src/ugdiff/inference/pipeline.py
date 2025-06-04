@@ -23,6 +23,15 @@ class SegmentationGuidedDiffusionPipeline:
         self.device = device
         self.guidance_module = guidance_module
 
+        for param in self.unet.parameters():
+            param.requires_grad = False
+
+        for param in self.vae.parameters():
+            param.requires_grad = False
+
+        for param in self.text_encoder.parameters():
+            param.requires_grad = False
+
     def encode_prompt(self, prompt):
         text_input = self.tokenizer(
             prompt,
@@ -31,7 +40,10 @@ class SegmentationGuidedDiffusionPipeline:
             truncation=True,
             return_tensors="pt",
         )
-        return self.text_encoder(text_input.input_ids.to(self.device))[0]
+
+        with torch.no_grad():
+            text_embeddings = self.text_encoder(text_input.input_ids.to(self.device))[0]
+        return text_embeddings
 
     def generate(
         self,
@@ -39,11 +51,14 @@ class SegmentationGuidedDiffusionPipeline:
         height=512,
         width=512,
         num_inference_steps=50,
-        seed=42,
+        seed=32,
         segmentation_maps=None,
         class_id=12,
     ):
-        batch_size = len(prompt)
+        if segmentation_maps is not None:
+            batch_size = len(segmentation_maps)
+        else:
+            batch_size = len(prompt)
         generator = seed_generator(seed=seed, device=self.device)
         text_embeddings = self.encode_prompt(prompt)
 
@@ -55,18 +70,24 @@ class SegmentationGuidedDiffusionPipeline:
         self.scheduler.set_timesteps(num_inference_steps)
         latents = latents * self.scheduler.init_noise_sigma
 
+        recurrent_steps = 10
+
         for t in tqdm(self.scheduler.timesteps):
-            # latents = latents.detach().requires_grad_()
+            # for k in range(recurrent_steps):
+            if self.guidance_module is not None and segmentation_maps is not None:
+                latents = latents.detach().requires_grad_()
+            else:
+                latents = latents.detach()
 
             latent_input = self.scheduler.scale_model_input(latents, t)
 
             # torch.no_grad() won't work if we want to use universally guided diffusion
-            with torch.no_grad():
-                noise_pred = self.unet(
-                    latent_input,
-                    torch.tensor([t], dtype=torch.float32, device=self.device),
-                    encoder_hidden_states=text_embeddings,
-                ).sample
+            # with torch.no_grad():
+            noise_pred = self.unet(
+                latent_input,
+                torch.tensor([t], dtype=torch.float32, device=self.device),
+                encoder_hidden_states=text_embeddings,
+            ).sample
 
             if self.guidance_module is not None and segmentation_maps is not None:
                 latents.requires_grad_(True)
@@ -83,9 +104,20 @@ class SegmentationGuidedDiffusionPipeline:
                     raise RuntimeError("Gradient is None. Ensure latents require grad.")
 
                 gradients = latents.grad.detach()
-                latents = latents - self.guidance_strength(t) * gradients
+                noise_pred = noise_pred + self.guidance_strength(t) * gradients
 
             latents = self.scheduler.step(noise_pred, t, latents).prev_sample
+
+            # if k < recurrent_steps - 1:
+            #     noise = torch.randn_like(latents)
+            #     latents = (
+            #         alpha_t
+            #         / self.scheduler.alphas_cumprod[t.long() - 1].to(self.device)
+            #     ).sqrt() * latents + (
+            #         1
+            #         - alpha_t
+            #         / self.scheduler.alphas_cumprod[t.long() - 1].to(self.device)
+            #     ).sqrt() * noise
 
         # Decode
         latents = 1 / 0.18215 * latents

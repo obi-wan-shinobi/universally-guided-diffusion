@@ -1,5 +1,9 @@
-import torch
-from diffusers import AutoencoderKL, LMSDiscreteScheduler, UNet2DConditionModel
+from diffusers import (
+    AutoencoderKL,
+    LMSDiscreteScheduler,
+    PNDMScheduler,
+    UNet2DConditionModel,
+)
 from transformers import CLIPTextModel, CLIPTokenizer
 
 
@@ -7,6 +11,7 @@ def load_vae(device):
     vae = AutoencoderKL.from_pretrained(
         "CompVis/stable-diffusion-v1-4", subfolder="vae"
     )
+
     return vae.to(device)
 
 
@@ -23,10 +28,22 @@ def load_unet(device):
     return unet.to(device)
 
 
-def create_scheduler(num_train_timesteps=1000):
+def create_LMS_scheduler(num_train_timesteps=1000):
     return LMSDiscreteScheduler(
         beta_start=0.00085,
         beta_end=0.012,
         beta_schedule="scaled_linear",
         num_train_timesteps=num_train_timesteps,
     )
+
+
+def create_PNDM_scheduler(num_train_timesteps=1000):
+    return PNDMScheduler.from_pretrained(
+        "CompVis/stable-diffusion-v1-4", subfolder="scheduler"
+    )
+    # return PNDMScheduler(
+    #     beta_start=0.00085,
+    #     beta_end=0.012,
+    #     beta_schedule="scaled_linear",
+    #     num_train_timesteps=num_train_timesteps,
+    # )

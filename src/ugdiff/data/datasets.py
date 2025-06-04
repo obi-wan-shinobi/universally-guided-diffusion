@@ -16,14 +16,23 @@ class COCODataset(Dataset):
         annotation_file=Path("coco/annotations/instances_val2017.json"),
         category_names=["dog"],
         transform=None,
+        use_annotations=True,
     ):
         self.image_dir = Path(image_dir)
-        self.annotation_file = Path(annotation_file)
+        self.annotation_file = Path(annotation_file) if annotation_file else None
         self.transform = transform or T.Compose([T.Resize((512, 512)), T.ToTensor()])
+        self.use_annotations = use_annotations
+        self.category_names = category_names or []
 
-        self.category_names = category_names
-        self._ensure_dataset()
-        self._load_annotations()
+        if self.use_annotations:
+            self._ensure_dataset()
+            self._load_annotations()
+        else:
+            self.filtered_filenames = [
+                f
+                for f in os.listdir(self.image_dir)
+                if f.lower().endswith((".jpg", ".jpeg", ".png"))
+            ]
 
     def _ensure_dataset(self):
         if not self.image_dir.exists():
