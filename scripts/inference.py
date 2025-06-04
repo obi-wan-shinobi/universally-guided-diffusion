@@ -91,10 +91,10 @@ generated_tensor = pipeline.generate(
     prompt=prompt,
     height=512,
     width=512,
-    num_inference_steps=100,
+    num_inference_steps=10,
     seed=32,
-    # segmentation_maps=target_masks,
-    # class_id=target_class_id,
+    segmentation_maps=target_masks,
+    class_id=target_class_id,
 )
 
 pil_images = latents_to_pil(generated_tensor)
