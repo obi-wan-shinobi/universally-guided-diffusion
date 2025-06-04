@@ -149,6 +149,7 @@ class SegmentationGuidance:
         pred_masks = self.extract_class_mask(probs, class_id)
 
         target_masks = F.interpolate(target_masks, size=(520, 520), mode="nearest")
+        target_masks = target_masks.float().clamp(0, 1)
 
         loss = F.binary_cross_entropy(pred_masks, target_masks, reduction="none")
 
