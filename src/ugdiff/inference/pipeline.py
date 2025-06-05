@@ -54,13 +54,20 @@ class SegmentationGuidedDiffusionPipeline:
         seed=32,
         segmentation_maps=None,
         class_id=12,
+        guidance_scale=2,
     ):
         if segmentation_maps is not None:
             batch_size = len(segmentation_maps)
         else:
             batch_size = len(prompt)
         generator = seed_generator(seed=seed, device=self.device)
-        text_embeddings = self.encode_prompt(prompt)
+
+        # --- Encode both conditional and unconditional prompts
+        text_embeddings = self.encode_prompt(prompt)  # Conditional
+        uncond_prompt = [""] * batch_size
+        uncond_embeddings = self.encode_prompt(uncond_prompt)  # Unconditional
+
+        text_embeddings = torch.cat([uncond_embeddings, text_embeddings], dim=0)
 
         latents = torch.randn(
             (batch_size, self.unet.in_channels, height // 8, width // 8),
@@ -81,13 +88,24 @@ class SegmentationGuidedDiffusionPipeline:
 
                 latent_input = self.scheduler.scale_model_input(latents, t)
 
+                # Duplicate for classifier-free guidance
+                latent_model_input = torch.cat([latent_input] * 2, dim=0)
+
                 # torch.no_grad() won't work if we want to use universally guided diffusion
                 # with torch.no_grad():
                 noise_pred = self.unet(
-                    latent_input,
+                    latent_model_input,
                     torch.tensor([t], dtype=torch.float32, device=self.device),
                     encoder_hidden_states=text_embeddings,
                 ).sample
+
+                # Split predictions
+                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+
+                # CFG interpolation
+                noise_pred = noise_pred_uncond + guidance_scale * (
+                    noise_pred_text - noise_pred_uncond
+                )
 
                 if self.guidance_module is not None and segmentation_maps is not None:
                     latents.requires_grad_(True)
