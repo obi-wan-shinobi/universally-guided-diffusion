@@ -17,6 +17,13 @@ import torchvision.transforms.functional as TF
 from ldm.util import instantiate_from_config
 from .helper import OptimizerDetails
 
+import json
+import hashlib
+from torchvision import transforms
+from data_loader.ms_coco import MSCOCO1kDataset
+from torchvision.transforms import ToPILImage
+import traceback
+import datetime
 
 def normalize_tensor(t):
     return (t * 2) - 1
@@ -95,6 +102,7 @@ def get_optimation_details(args, device):
     guidance = nn.DataParallel(guidance).to(device)
     operation = OptimizerDetails()
     operation.num_steps = args.optim_num_steps
+    operation.guidance_func = None
     operation.optimizer = 'Adam'
     operation.lr = args.optim_lr
     operation.loss_func = guidance
@@ -104,6 +112,8 @@ def get_optimation_details(args, device):
     operation.guidance_3 = args.optim_forward_guidance
     operation.guidance_2 = args.optim_backward_guidance
     operation.original_guidance = args.optim_original_conditioning
+    print(f"guidance_3: {operation.guidance_3}, guidance_2: {operation.guidance_2}, original_guidance: {operation.original_guidance}")
+    
     operation.mask_type = args.optim_mask_type
     operation.optim_guidance_3_wt = args.optim_forward_guidance_wt
     operation.do_guidance_3_norm = args.optim_do_forward_guidance_norm
@@ -113,6 +123,13 @@ def get_optimation_details(args, device):
     operation.folder = args.optim_folder
     return operation, guidance
 
+def create_dataloader(batch_size, image_transforms):
+    dataset = MSCOCO1kDataset(
+        image_transform=image_transforms,
+        text_transform=None
+    )
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, pin_memory=True, drop_last=False)
+    return loader
 
 def main():
     parser = argparse.ArgumentParser()
@@ -126,9 +143,9 @@ def main():
                         help="DDIM eta (0.0 = deterministic sampling)")
     parser.add_argument("--n_iter", type=int, default=2,
                         help="how many sampling iterations to run")
-    parser.add_argument("--H", type=int, default=512,
+    parser.add_argument("--H", type=int, default=256,
                         help="image height in pixels")
-    parser.add_argument("--W", type=int, default=512,
+    parser.add_argument("--W", type=int, default=256,
                         help="image width in pixels")
     parser.add_argument("--C", type=int, default=4,
                         help="number of latent channels")
@@ -190,6 +207,7 @@ def main():
     # text / batches
     parser.add_argument("--text", type=str, default=None,
                         help="text prompt (overrides text_type presets)")
+    
     parser.add_argument("--text_type", type=int, default=1,
                         help="preset text type index")
     parser.add_argument("--batches", type=int, default=0,
@@ -198,8 +216,8 @@ def main():
     args = parser.parse_args()
 
     seed_everything(args.seed)
-    create_folder(args.optim_folder)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
 
     config = OmegaConf.load(args.config)
     model = load_model_from_config(config, args.ckpt)
@@ -207,20 +225,102 @@ def main():
 
     operation, guidance = get_optimation_details(args, device)
 
-    root = 'data/clip_guided/'
-    ds = ImageFolderDataset(root, args.W)
-    loader = DataLoader(ds, batch_size=1, shuffle=False, pin_memory=True, drop_last=True)
+    # ! new
+    date_str = datetime.datetime.now().strftime("%m-%d")
+    gt_img_dir = f'test_clip/{date_str}/GT/'
+    output_img_dir = f'test_clip/{date_str}/output/'
+    prompt_dir = f'test_clip/{date_str}/input/prompts/'
+    create_folder(gt_img_dir)
+    create_folder(output_img_dir)
+    create_folder(prompt_dir)
+
+    batch_size = 1
+    num_workers = 0
+    dtype = torch.float16
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+    image_transforms = transforms.Compose([
+        transforms.Resize((args.W, args.H)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std),
+    ])
+    dataset = MSCOCO1kDataset(
+        image_transform=image_transforms,
+        text_transform=None
+    )
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, pin_memory=True, drop_last=False, num_workers=num_workers)
+
+    to_pil = ToPILImage()
+    prompts = []
 
     cnt = 0
-    for batch_idx, img in enumerate(loader):
-        cond = model.module.get_learned_conditioning([''] * img.size(0))
-        output = model.module.operation_diffusion(og_img=img, operated_image=clip.tokenize([args.text or '' ]).to(device),
-                                                cond=cond, operation=operation)
-        for out in output:
-            save_with_border(out, os.path.join(args.optim_folder, f'out_{cnt}.png'))
-            cnt += 1
-        if batch_idx == args.batches:
+    while True:
+        try:
+            for batch_idx, (images, captions, image_ids) in enumerate(loader):
+                images = images.to(device)
+                for i in range(images.size(0)):
+                    img_tensor = images[i].cpu()
+                    img = img_tensor * torch.tensor(std).view(3,1,1) + torch.tensor(mean).view(3,1,1)
+                    img = torch.clamp(img, 0, 1)
+                    pil_img = to_pil(img)
+                    img_name = f"{image_ids[i]}.png" 
+                    pil_img.save(os.path.join(gt_img_dir, img_name))
+                    prompts.append({"image": img_name, "text": captions[i]})
+                
+                xc = images.size(0) * [""]
+                cond = model.module.get_learned_conditioning(xc).to(device)
+                # output = model.module.operation_diffusion(
+                #     og_img=images,
+                #     operated_image=clip.tokenize(list(captions)).to(device),
+                #     cond=cond,
+                #     operation=operation
+                # )
+                # conditional generation
+                output = model.module.operation_diffusion(
+                    og_img=images,
+                    operated_image=clip.tokenize(list(captions)).to(device),
+                    cond=model.module.get_learned_conditioning([captions[i] for i in range(images.size(0))]).to(device),
+                    operation=operation
+                )
+                for i, out in enumerate(output):
+                    out_img = (out + 1) * 0.5
+                    out_img = torch.clamp(out_img, 0, 1)
+                    out_pil = to_pil(out_img.cpu())
+                    img_name = f"{image_ids[i]}.png"
+                    out_pil.save(os.path.join(output_img_dir, img_name))
+                cnt += images.size(0)
+
+                if cnt % 10 == 0:
+                    break
+
+                if args.batches and batch_idx >= args.batches:
+                    break
             break
+        except Exception as e:
+            traceback.print_exc()
+            print(f"DataLoader error at batch {batch_idx}, restarting DataLoader. Error: {e}")
+            loader = create_dataloader(batch_size, image_transforms)
+            continue
+
+    prompt_path = os.path.join(prompt_dir, "prompts.json")
+    with open(prompt_path, "w", encoding="utf-8") as f:
+        json.dump(prompts, f, ensure_ascii=False, indent=2)
+    print(f"Prompts saved to {prompt_path}")
+
+    # root = 'test_clip/inputs/'
+    # ds = ImageFolderDataset(root, args.W)
+    # loader = DataLoader(ds, batch_size=1, shuffle=False, pin_memory=True, drop_last=True)
+
+    # cnt = 0
+    # for batch_idx, img in enumerate(loader):
+    #     cond = model.module.get_learned_conditioning([''] * img.size(0))
+    #     output = model.module.operation_diffusion(og_img=img, operated_image=clip.tokenize([args.text or '' ]).to(device),
+    #                                             cond=cond, operation=operation)
+    #     for out in output:
+    #         save_with_border(out, os.path.join(args.optim_folder, f'out_{cnt}.png'))
+    #         cnt += 1
+    #     if batch_idx == args.batches:
+    #         break
 
 
 if __name__ == '__main__':

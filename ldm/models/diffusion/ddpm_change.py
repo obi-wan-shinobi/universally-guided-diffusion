@@ -658,97 +658,57 @@ class LatentDiffusion(DDPM):
 
         return fold, unfold, normalization, weighting
 
-    # ? 1. is the opertion == guidance
-    # ? 2. is operated_imag == class prompt
-    def operation_diffusion(self, og_img, operated_image, cond, operation, return_first_stage_outputs=False,
-                            force_c_encode=False,
-                            cond_key=None, return_original_cond=False, bs=None):
+    def operation_diffusion(self, og_img, text_embedding, cond, operation):
 
         og_img = og_img.to(self.device)
         device = self.betas.device
-
         b = og_img.shape[0]
-
-        # ! z = z_t
+        # 1. initialize z_t and timestep
         encoder_posterior = self.encode_first_stage(og_img)
         z = self.get_first_stage_encoding(encoder_posterior).detach()
         z = torch.randn_like(z)
-        #######
-
         verbose = True
         timesteps = self.num_timesteps
-        iterator = tqdm(reversed(range(0, timesteps)), desc='Sampling t', total=timesteps) if verbose else reversed(
-            range(0, timesteps))
+        iterator = tqdm(reversed(range(0, timesteps)), desc='Sampling t', total=timesteps) if verbose else reversed(range(0, timesteps))
 
-        # ! timesteps = T
         for param in self.first_stage_model.parameters():
             param.requires_grad = False
 
         for i in iterator:
             ts = torch.full((b,), i, device=device, dtype=torch.long)
             ts_1 = torch.full((b,), i - 1, device=device, dtype=torch.long)
-            # start with z that is z_t
-            
-            # ! num_step_length = recurrent step k
+            # set hyperparameter k
             num_step_length = len(operation.num_steps)
             index = int(num_step_length * (ts[0] / self.num_timesteps))
             num_steps = operation.num_steps[index]
-
             loss = None
-            _ = None
 
+            # per-step self-recurrence
             for j in range(num_steps):
-
-                operation_func = operation.operation_func
-                other_guidance_func = operation.other_guidance_func
-                criterion = operation.loss_func
-                other_criterion = operation.other_criterion
+                guidance_func = operation.guidance_func
+                loss_func = operation.loss_func
                 max_iters = operation.max_iters
                 loss_cutoff = operation.loss_cutoff
 
-                # G3
-                # ! guidance_3 = forward_guidance : noise optimization -> get enhanced clean latent and reconstructed image
+                # forward_guidance : noise optimization -> get enhanced clean latent and reconstructed image
                 if operation.guidance_3:
-
                     torch.set_grad_enabled(True)
-                    # ? when grads are needed, and during which stage the parameters are updated, and what parameters are updated
                     z_in = z.detach().requires_grad_(True)
                     model_output = self.apply_model(z_in, ts, cond)
-                    # ! apply formula (3) to get denoised latent z_recon and clean image recons_image
+                    # apply formula (3) to get denoised latent z_recon and clean image recons_image
                     z_recon = self.predict_start_from_noise(z_in, t=ts, noise=model_output)
                     recons_image = self.decode_first_stage_with_grad(z_recon)
 
-                    # ! Optionally save original clean image
-                    if operation.print:
-                        if i % operation.print_every == 0 and j == 0:
-                            temp = (recons_image + 1) * 0.5 # ! normalize to [0, 1]
-                            utils.save_image(temp, f'{operation.folder}/original_guidance_{i}.png')
-                    
-                    # ? what's the difference between other_guidance_funce and operation_func
-                    if other_guidance_func != None:
-                        op_im = other_guidance_func(recons_image)
-                    elif operation_func != None:
-                        op_im = operation_func(recons_image)
-                    else:
-                        op_im = recons_image
+                    # apply guidance function and loss function, assign the preprocessed image and text prompt to CLIP, image -> ResNet-50, text -> Transformer
+                    # return log likelihood
+                    selected = -1 * loss_func(recons_image, text_embedding)
 
-                    # ! in assignment of operation, operation.other_criterion = None
-                    if other_criterion != None:
-                        selected = -1 * other_criterion(op_im, operated_image)
-                    else:
-                        selected = -1 * criterion(op_im, operated_image)
-
-                    
-                    print(ts)
-                    print(selected)
-
-                    # ! Backprop to get gradient w.r.t. z_t
+                    # Backprop to get gradient w.r.t. z_t
                     grad = th.autograd.grad(selected.sum(), z_in)[0]
                     grad = grad * operation.optim_guidance_3_wt
-
                     alpha_bar = extract_into_tensor(self.alphas_cumprod, ts, z.shape)
 
-                    # ! apply formula (6) to get eps
+                    # apply formula (6) to get eps
                     eps = model_output
                     eps = eps - (1 - alpha_bar).sqrt() * grad
 
@@ -759,38 +719,21 @@ class LatentDiffusion(DDPM):
                     z_recon = self.predict_start_from_noise(z, t=ts, noise=eps)
                     recons_image = self.decode_first_stage(z_recon)
 
-                    # ! save recons_image
-                    if operation.print:
-                        if i % operation.print_every == 0 and j == 0:
-                            temp = (recons_image + 1) * 0.5
-                            utils.save_image(temp, f'{operation.folder}/guidance_3_{i}.png')
-
-
                 else:
                     model_output = self.apply_model(z, ts, cond)
                     z_recon = self.predict_start_from_noise(z, t=ts, noise=model_output)
                     recons_image = self.decode_first_stage(z_recon)
-
-                    if operation.print:
-                        if i % operation.print_every == 0 and j == 0:
-                            temp = (recons_image + 1) * 0.5
-                            utils.save_image(temp, f'{operation.folder}/original_guidance_{i}.png')
-
-                # change the recons image
-                # G2 guidance
-                # you have recons_image so optimize it
                 
-                # ! guidance_2 = backward_guidance : directly optimize reconstructed image(with or without noise optimization) -> encode to get enhanced clean latent
+                # backward_guidance : directly optimize reconstructed image(with or without noise optimization) -> encode to get enhanced clean latent
                 if operation.guidance_2:
-                    
-                    # ! directly optimize predicted clean image
+        
+                    # directly optimize predicted clean image
                     torch.set_grad_enabled(True)
                     recons_image = recons_image.detach().requires_grad_(True)
 
                     if operation.optimizer == 'Adam':
                         lr = operation.lr
                         optimizer = torch.optim.Adam([recons_image], lr=lr)
-
                     if operation.lr_scheduler == 'CosineAnnealingLR':
                         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, max_iters)
 
@@ -798,19 +741,12 @@ class LatentDiffusion(DDPM):
                     ones = torch.ones_like(recons_image).cuda()
                     zeros = torch.zeros_like(recons_image).cuda()
 
+                    # gradient descent to get enhanced clean image
                     for _ in range(max_iters):
                         with torch.no_grad():
                             recons_image.clamp_(-1, 1)
-
                         optimizer.zero_grad()
-                        if operation_func != None:
-                            op_im = operation_func(recons_image)
-                        else:
-                            op_im = recons_image
-
-                        loss = criterion(op_im, operated_image)
-
-                        # ? the unmentioned weights
+                        loss = loss_func(recons_image, text_embedding)
                         for __ in range(loss.shape[0]):
                             if loss[__] < loss_cutoff:
                                 weights[__] = zeros[__]
@@ -834,25 +770,22 @@ class LatentDiffusion(DDPM):
 
                     recons_image.requires_grad = False
                     torch.set_grad_enabled(False)
-
                     recons_image = torch.clamp(recons_image, -1, 1)
                     z_recon = self.encode_first_stage(recons_image)
 
-                # ! predict noise with enhanced clean latent either by noise optimization or reconstructed image optimization
-                # ! apply formula (9) to get enhanced noise
+                # predict noise with enhanced clean latent either by noise optimization or reconstructed image optimization
+                # apply formula (9) to get enhanced noise
                 z_epsilon = self.predict_noise_from_xstart(z, ts, z_recon)
 
-                # ! apply formula (8) to get z_t-1
+                # apply formula (8) to get z_t-1
                 if i != 0:
                     coeff1 = extract_into_tensor(self.sqrt_alphas_cumprod, ts_1, z.shape)
                     coeff2 = extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, ts_1, z.shape)
-
                     z = z_recon * coeff1 + z_epsilon * coeff2
                 else:
                     z = z_recon
 
-                ## take one more step
-                # ! apply one step diffusion to reconstruct z_t
+                # apply one step diffusion to reconstruct z_t
                 coeff1 = torch.sqrt(1 - extract_into_tensor(self.betas, ts, z.shape))
                 coeff2 = torch.sqrt(extract_into_tensor(self.betas, ts, z.shape))
                 z = coeff1 * z + coeff2 * torch.randn_like(z)
@@ -863,8 +796,6 @@ class LatentDiffusion(DDPM):
                 z = z_recon * coeff1 + z_epsilon * coeff2
             else:
                 z = z_recon
-
-            # break
 
         recons_image = self.decode_first_stage(z)
         return recons_image
