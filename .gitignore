@@ -8,3 +8,4 @@ results/
 clip_guided_old.py
 test_clip/
 test_clip_ddim/
+model.ckpt
