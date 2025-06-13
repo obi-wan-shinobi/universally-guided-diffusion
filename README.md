@@ -38,6 +38,15 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -e .
 ```
 
+## Running the inference scripts
+
+The inference script lives in `scripts/inference.py`. The output is stored in a `tmp` folder in the base folder.
+The script currently produces only noisy output when used with recurrent steps.
+
+## Experiments
+
+The experimental results can be found in the `experiments/` folder.
+
 ## Running stable diffusion scripts
 
 You can run the generate script through:
@@ -45,3 +54,5 @@ You can run the generate script through:
 ```bash
 python3 scripts/generate.py
 ```
+
+This was a simple script to try stable diffusion and get an idea about the pipeline.

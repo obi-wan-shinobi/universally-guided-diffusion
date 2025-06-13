@@ -3,11 +3,17 @@ from pathlib import Path
 import torch
 from diffusers import StableDiffusionPipeline
 
+torch_device = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps" if torch.backends.mps.is_available() else "cpu"
+)  # Or "cuda" / "cpu"
+
 
 def load_pipeline():
     pipe = StableDiffusionPipeline.from_pretrained(
         "CompVis/stable-diffusion-v1-4", torch_dtype=torch.float32
-    ).to("mps")
+    ).to(torch_device)
 
     pipe.safety_checker = None
     pipe.requires_safety_checker = False

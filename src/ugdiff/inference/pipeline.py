@@ -51,6 +51,7 @@ class SegmentationGuidedDiffusionPipeline:
         height=512,
         width=512,
         num_inference_steps=50,
+        recurrent_steps=10,
         seed=32,
         segmentation_maps=None,
         class_id=12,
@@ -74,8 +75,6 @@ class SegmentationGuidedDiffusionPipeline:
         )
         self.scheduler.set_timesteps(num_inference_steps)
         latents = latents * self.scheduler.init_noise_sigma
-
-        recurrent_steps = 3
 
         for t in tqdm(self.scheduler.timesteps):
             for k in range(recurrent_steps):

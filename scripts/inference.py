@@ -14,7 +14,11 @@ from ugdiff.models.stable_diffusion import (
 )
 from ugdiff.utils import latents_to_pil
 
-torch_device = "mps"  # Or "cuda" / "cpu"
+torch_device = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps" if torch.backends.mps.is_available() else "cpu"
+)  # Or "cuda" / "cpu"
 target_class_id = 12  # Dog in COCO/VOC
 
 vae = load_vae(torch_device)
@@ -92,9 +96,11 @@ generated_tensor = pipeline.generate(
     height=512,
     width=512,
     num_inference_steps=10,
+    recurrent_steps=10,
     seed=32,
     segmentation_maps=target_masks,
     class_id=target_class_id,
+    guidance_scale=10,
 )
 
 pil_images = latents_to_pil(generated_tensor)

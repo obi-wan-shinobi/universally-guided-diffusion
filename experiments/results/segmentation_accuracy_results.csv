@@ -1,0 +1,14 @@
+Image,Prompt Folder,Pixel Accuracy,IoU
+Image 0,prompt-1,0.9658,0.8968
+Image 0,prompt-2,0.9737,0.9212
+Image 0,prompt-3,0.9690,0.9066
+Image 0,prompt-4,0.9525,0.8558
+Image 1,prompt-1,0.9636,0.8784
+Image 1,prompt-2,0.9693,0.8953
+Image 1,prompt-3,0.9668,0.8860
+Image 1,prompt-4,0.9696,0.8935
+Image 2,prompt-1,0.9608,0.8281
+Image 2,prompt-2,0.9657,0.8464
+Image 2,prompt-3,0.9747,0.8865
+Image 2,prompt-4,0.9680,0.8619
+Average,All,0.9666,0.8797
