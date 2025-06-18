@@ -21,7 +21,7 @@ def main():
 
     assert len(subdirs) == len(prompts), "Number of subdirs and prompts must match"
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
     model, preprocess = clip.load("ViT-B/32", device=device)
 
     for idx, subdir in enumerate(subdirs):
@@ -69,26 +69,26 @@ def main():
             sims = (img_feats @ txt_feats.T).squeeze(1).cpu().numpy()
 
         # Prepare bar plot data
-        x = list(range(1, len(sims) + 1))
-        legends = {"universal-guided-diffusion": "tab:blue", "conditional stable diffusion": "tab:orange"}
+        # x = list(range(1, len(sims) + 1))
+        # legends = {"universal-guided-diffusion": "tab:blue", "conditional stable diffusion": "tab:orange"}
 
-        plt.figure(figsize=(6, 4))
-        # Plot bars for each group
-        for i, (score, label) in enumerate(zip(sims, img_labels)):
-            plt.bar(x[i], score, color=legends[label], label=label if i == 0 or (i == 1 and len(sims) > 1) else "")
-            plt.text(x[i], score + 0.02, f"{score:.3f}", ha='center', va='bottom', fontsize=10)
-        plt.ylim(0, 1)
-        plt.xlabel("Image Index")
-        plt.ylabel("Cosine Similarity")
-        plt.title(f"Prompt {idx+1}")
-        handles = [
-            plt.Rectangle((0,0),1,1,color=legends["universal-guided-diffusion"]),
-            plt.Rectangle((0,0),1,1,color=legends["conditional stable diffusion"])
-        ]
-        plt.legend(handles, ["universal-guided-diffusion", "conditional stable diffusion"])
-        plt.tight_layout()
-        plt.savefig(os.path.join(res_dir, f"prompt_{idx+1}.png"))
-        plt.close()
+        # plt.figure(figsize=(6, 4))
+        # # Plot bars for each group
+        # for i, (score, label) in enumerate(zip(sims, img_labels)):
+        #     plt.bar(x[i], score, color=legends[label], label=label if i == 0 or (i == 1 and len(sims) > 1) else "")
+        #     plt.text(x[i], score + 0.02, f"{score:.3f}", ha='center', va='bottom', fontsize=10)
+        # plt.ylim(0, 1)
+        # plt.xlabel("Image Index")
+        # plt.ylabel("Cosine Similarity")
+        # plt.title(f"Prompt {idx+1}")
+        # handles = [
+        #     plt.Rectangle((0,0),1,1,color=legends["universal-guided-diffusion"]),
+        #     plt.Rectangle((0,0),1,1,color=legends["conditional stable diffusion"])
+        # ]
+        # plt.legend(handles, ["universal-guided-diffusion", "conditional stable diffusion"])
+        # plt.tight_layout()
+        # plt.savefig(os.path.join(res_dir, f"prompt_{idx+1}.png"))
+        # plt.close()
 
         # Print results
         print(f"Prompt {idx+1}: {prompt}")

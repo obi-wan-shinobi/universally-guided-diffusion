@@ -10,10 +10,16 @@ import math
 
 import numpy as np
 import torch as th
+import torch
 
 from .nn import mean_flat
 from .losses import normal_kl, discretized_gaussian_log_likelihood
-
+import torch.optim as optim
+from torch import nn, einsum
+from torch.autograd import Variable
+import torchvision.transforms.functional as TF
+from torchvision import transforms, utils
+import torch.nn.functional as F
 
 def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
     """
@@ -258,7 +264,6 @@ class GaussianDiffusion:
         B, C = x.shape[:2]
         assert t.shape == (B,)
         model_output = model(x, self._scale_timesteps(t), **model_kwargs)
-
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
             assert model_output.shape == (B, C * 2, *x.shape[2:])
             model_output, model_var_values = th.split(model_output, C, dim=1)
@@ -319,6 +324,7 @@ class GaussianDiffusion:
             model_mean.shape == model_log_variance.shape == pred_xstart.shape == x.shape
         )
         return {
+            'model_output': model_output,
             "mean": model_mean,
             "variance": model_variance,
             "log_variance": model_log_variance,
@@ -436,7 +442,7 @@ class GaussianDiffusion:
                 cond_fn, out, x, t, model_kwargs=model_kwargs
             )
         sample = out["mean"] + nonzero_mask * th.exp(0.5 * out["log_variance"]) * noise
-        return {"sample": sample, "pred_xstart": out["pred_xstart"]}
+        return {"sample": sample, "pred_xstart": out["pred_xstart"], 'model_output': out['model_output']}
 
     def p_sample_loop(
         self,
@@ -449,6 +455,8 @@ class GaussianDiffusion:
         model_kwargs=None,
         device=None,
         progress=False,
+        max_time=None,
+        start_factor=1
     ):
         """
         Generate samples from the model.
@@ -480,6 +488,8 @@ class GaussianDiffusion:
             model_kwargs=model_kwargs,
             device=device,
             progress=progress,
+            max_time=max_time,
+            start_factor=start_factor
         ):
             final = sample
         return final["sample"]
@@ -495,6 +505,8 @@ class GaussianDiffusion:
         model_kwargs=None,
         device=None,
         progress=False,
+        max_time=None,
+        start_factor=1
     ):
         """
         Generate samples from the model and yield intermediate samples from
@@ -510,8 +522,10 @@ class GaussianDiffusion:
         if noise is not None:
             img = noise
         else:
-            img = th.randn(*shape, device=device)
-        indices = list(range(self.num_timesteps))[::-1]
+            img = th.randn(shape[0], shape[1], shape[2] * start_factor, shape[3] * start_factor).to(device)
+            print(img.shape)
+        max_time = max_time or self.num_timesteps
+        indices = list(range(max_time))[::-1]
 
         if progress:
             # Lazy import so that we don't depend on tqdm.
@@ -584,6 +598,254 @@ class GaussianDiffusion:
         sample = mean_pred + nonzero_mask * sigma * noise
         return {"sample": sample, "pred_xstart": out["pred_xstart"]}
 
+
+
+    def ddim_sample_operation(
+        self,
+        model,
+        x,
+        t,
+        operated_image,
+        operation,
+        clip_denoised=True,
+        denoised_fn=None,
+        cond_fn=None,
+        model_kwargs=None,
+        eta=0.0,
+    ):
+        """
+        Sample x_{t-1} from the model using DDIM.
+
+        Same usage as p_sample().
+        """
+
+        sqrt_one_minus_beta = np.sqrt(1 - self.betas)
+        sqrt_beta = np.sqrt(self.betas)
+
+
+        num_step_length = len(operation.num_steps)
+        index = int(num_step_length * (t[0] / self.num_timesteps))
+        num_steps = operation.num_steps[index]
+
+        loss = None
+        _ = None
+
+        for j in range(num_steps):
+            if (not operation.guidance_3):
+                out = self.p_mean_variance(
+                    model,
+                    x,
+                    t,
+                    clip_denoised=clip_denoised,
+                    denoised_fn=denoised_fn,
+                    model_kwargs=model_kwargs,
+                )
+
+
+            operation_func = operation.operation_func
+            other_guidance_func = operation.other_guidance_func
+            criterion = operation.loss_func
+            other_criterion = operation.other_criterion
+            max_iters = operation.max_iters
+            loss_cutoff = operation.loss_cutoff
+
+            if (operation.print and (not operation.guidance_3)):
+                if t[0] % operation.print_every == 0 and j==0:
+                    temp = (out["pred_xstart"] + 1) * 0.5
+                    utils.save_image(temp, f'{operation.folder}/old_sample_{t[0]}.png')
+
+
+            if operation.guidance_3:
+                torch.set_grad_enabled(True)
+                x_in = x.detach().requires_grad_(True)
+
+                model_output = model(x_in, self._scale_timesteps(t), **model_kwargs)
+                model_output, _ = th.split(model_output, 3, dim=1)
+                pred_xstart = self._predict_xstart_from_eps(x_t=x_in, t=t, eps=model_output)
+                pred_xstart.clamp(-1, 1)
+
+                if other_guidance_func != None:
+                    op_im = other_guidance_func(pred_xstart)
+                elif operation_func != None:
+                    op_im = operation_func(pred_xstart)
+                else:
+                    op_im = pred_xstart
+
+                if operation_func and hasattr(operation_func.module, 'cal_loss'):
+                    selected = -1 * operation_func.module.cal_loss(pred_xstart, operated_image).unsqueeze(0)
+                elif other_criterion != None:
+                    selected = -1 * other_criterion(op_im, operated_image)
+                else:
+                    selected = -1 * criterion(op_im, operated_image)
+
+                # print(selected)
+
+                grad = th.autograd.grad(selected.sum(), x_in)[0]
+                grad = grad * operation.optim_guidance_3_wt
+
+                alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
+
+                eps = model_output
+                eps = eps - (1 - alpha_bar).sqrt() * grad
+
+                out = {}
+                out["pred_xstart"] = self._predict_xstart_from_eps(x, t, eps)
+
+
+
+                if operation.print:
+                    if t[0] % operation.print_every == 0 and j == 0:
+                        temp = (out["pred_xstart"] + 1) * 0.5
+                        utils.save_image(temp, f'{operation.folder}/guide_3_{t[0]}.png')
+
+
+
+            if operation.original_guidance:
+                alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
+                eps = self._predict_eps_from_xstart(x, t, out["pred_xstart"])
+                x_in = x.detach().requires_grad_(True)
+                grad = (1 - alpha_bar).sqrt() * cond_fn(
+                    x_in, self._scale_timesteps(t), **model_kwargs
+                )
+                eps = eps - grad
+
+                out["pred_xstart"] = self._predict_xstart_from_eps(x, t, eps)
+
+                if operation.print:
+                    if t[0] % operation.print_every == 0 and j == 0:
+                        temp = (out["pred_xstart"] + 1) * 0.5
+                        utils.save_image(temp, f'{operation.folder}/original_guidance_{t[0]}.png')
+
+
+            x0 = out["pred_xstart"]
+            if operation.old_img != None:
+                fact = operation.fact
+                x0 = fact * operation.old_img + (1 - fact) * x0
+
+
+            torch.set_grad_enabled(True)
+            x0 = x0.detach().requires_grad_(True)
+
+            if operation.optimizer == 'Adam':
+                lr = operation.lr
+                optimizer = torch.optim.Adam([x0], lr=lr)
+
+            if operation.lr_scheduler == 'CosineAnnealingLR':
+                scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, max_iters)
+
+            loss = None
+            _ = None
+            weights = torch.ones_like(x0).cuda()
+            ones = torch.ones_like(x0).cuda()
+            zeros = torch.zeros_like(x0).cuda()
+
+            for _ in range(max_iters):
+                with torch.no_grad():
+                    x0.clamp_(-1, 1)
+
+                optimizer.zero_grad()
+                if operation_func != None:
+                    if operation.Aug != None:
+                        op_im = operation.Aug(x0)
+                        op_im = operation_func(op_im)
+                    else:
+                        op_im = operation_func(x0)
+                else:
+                    op_im = x0
+
+                if hasattr(operation_func.module, 'cal_loss'):
+                    tmp_loss = operation_func.module.cal_loss(x0, operated_image)
+                    loss = tmp_loss.unsqueeze(0)
+                    #loss = -1 * tmp_loss.unsqueeze(0)
+                else:
+                    loss = criterion(op_im, operated_image)
+
+                for __ in range(loss.shape[0]):
+                    if loss[__] < loss_cutoff:
+                        weights[__] = zeros[__]
+                    else:
+                        weights[__] = ones[__]
+
+                before_x = torch.clone(x0.data)
+                m_loss = loss.sum()
+
+                if operation.tv_loss != None:
+                    diff1 = x0[:, :, :, :-1] - x0[:, :, :, 1:]
+                    diff2 = x0[:, :, :-1, :] - x0[:, :, 1:, :]
+                    diff3 = x0[:, :, 1:, :-1] - x0[:, :, :-1, 1:]
+                    diff4 = x0[:, :, :-1, :-1] - x0[:, :, 1:, 1:]
+                    loss_var = torch.norm(diff1) + torch.norm(diff2) + torch.norm(diff3) + torch.norm(diff4)
+                    m_loss += operation.tv_loss * loss_var
+
+                m_loss.backward()
+                optimizer.step()
+
+                if operation.lr_scheduler != None:
+                    scheduler.step()
+
+                with torch.no_grad():
+                    x0.data = before_x * (1 - weights) + weights * x0.data
+
+                if weights.sum() == 0:
+                    break
+
+            x0.requires_grad = False
+            torch.set_grad_enabled(False)
+
+            out["pred_xstart"] = torch.clamp(x0, -1, 1)
+
+            if operation.warm_start:
+                operation.old_img = out["pred_xstart"]
+
+            ##################
+
+            # Usually our model outputs epsilon, but we re-derive it
+            # in case we used x_start or x_prev prediction.
+            eps = self._predict_eps_from_xstart(x, t, out["pred_xstart"])
+
+            alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
+            alpha_bar_prev = _extract_into_tensor(self.alphas_cumprod_prev, t, x.shape)
+            if operation.sampling_type == 'ddpm':
+                sigma = (
+                    1.0
+                    * th.sqrt((1 - alpha_bar_prev) / (1 - alpha_bar))
+                    * th.sqrt(1 - alpha_bar / alpha_bar_prev)
+                )
+            elif operation.sampling_type == 'fully_random':
+                sigma = th.sqrt(1 - alpha_bar_prev)
+            else:
+                sigma=0
+            ####
+            # Equation 12.
+            noise = th.randn_like(x)
+            mean_pred = (
+                out["pred_xstart"] * th.sqrt(alpha_bar_prev)
+                + th.sqrt(1 - alpha_bar_prev - sigma ** 2) * eps
+            )
+            nonzero_mask = (
+                (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
+            )  # no noise when t == 0
+            sample = mean_pred + nonzero_mask * sigma * noise
+
+
+            coeff1 = _extract_into_tensor(sqrt_one_minus_beta, t, x.shape)
+            coeff2 = _extract_into_tensor(sqrt_beta, t, x.shape)
+            x = sample * coeff1 + th.randn_like(x) * coeff2
+
+        if operation.print:
+            print(loss)
+
+        if operation.print:
+            if t[0] % operation.print_every == 0:
+                temp = (sample + 1) * 0.5
+                utils.save_image(temp, f'{operation.folder}/sample_{t[0]}.png')
+
+                temp = (out["pred_xstart"] + 1) * 0.5
+                utils.save_image(temp, f'{operation.folder}/pred_xstart_{t[0]}.png')
+
+
+        return {"sample": sample, "pred_xstart": out["pred_xstart"]}
+
     def ddim_reverse_sample(
         self,
         model,
@@ -634,6 +896,7 @@ class GaussianDiffusion:
         device=None,
         progress=False,
         eta=0.0,
+        start_factor=1
     ):
         """
         Generate samples from the model using DDIM.
@@ -655,6 +918,47 @@ class GaussianDiffusion:
         ):
             final = sample
         return final["sample"]
+
+
+
+    def ddim_sample_loop_operation(
+        self,
+        model,
+        shape,
+        operated_image,
+        operation,
+        noise=None,
+        clip_denoised=True,
+        denoised_fn=None,
+        cond_fn=None,
+        model_kwargs=None,
+        device=None,
+        progress=False,
+        eta=0.0
+    ):
+        """
+        Generate samples from the model using DDIM.
+
+        Same usage as p_sample_loop().
+        """
+        final = None
+        for sample in self.ddim_sample_loop_progressive_operation(
+            model,
+            shape,
+            operated_image,
+            operation,
+            noise=noise,
+            clip_denoised=clip_denoised,
+            denoised_fn=denoised_fn,
+            cond_fn=cond_fn,
+            model_kwargs=model_kwargs,
+            device=device,
+            progress=progress,
+            eta=eta,
+        ):
+            final = sample
+        return final["sample"]
+
 
     def ddim_sample_loop_progressive(
         self,
@@ -705,6 +1009,65 @@ class GaussianDiffusion:
                 )
                 yield out
                 img = out["sample"]
+
+
+    def ddim_sample_loop_progressive_operation(
+        self,
+        model,
+        shape,
+        operated_image,
+        operation,
+        noise=None,
+        clip_denoised=True,
+        denoised_fn=None,
+        cond_fn=None,
+        model_kwargs=None,
+        device=None,
+        progress=False,
+        eta=0.0,
+    ):
+        """
+        Use DDIM to sample from the model and yield intermediate samples from
+        each timestep of DDIM.
+
+        Same usage as p_sample_loop_progressive().
+        """
+        if device is None:
+            device = next(model.parameters()).device
+        assert isinstance(shape, (tuple, list))
+        if noise is not None:
+            img = noise
+        else:
+            img = th.randn(*shape, device=device)
+        indices = list(range(self.num_timesteps))[::-1]
+
+        if progress:
+            # Lazy import so that we don't depend on tqdm.
+            from tqdm.auto import tqdm
+
+            indices = tqdm(indices)
+
+        for i in indices:
+            t = th.tensor([i] * shape[0], device=device)
+            with th.no_grad():
+                out = self.ddim_sample_operation(
+                    model,
+                    img,
+                    t,
+                    operated_image,
+                    operation,
+                    clip_denoised=clip_denoised,
+                    denoised_fn=denoised_fn,
+                    cond_fn=cond_fn,
+                    model_kwargs=model_kwargs,
+                    eta=eta,
+                )
+                yield out
+                # {"sample": sample, "pred_xstart": out["pred_xstart"]}
+                img = out["sample"]
+                # img = out["pred_xstart"]
+                # if i == 990:
+                #     break
 
     def _vb_terms_bpd(
         self, model, x_start, x_t, t, clip_denoised=True, model_kwargs=None
